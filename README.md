@@ -23,7 +23,7 @@
     - これまでの記録データの **CSVダウンロード**（UTF-8 BOM付き）
 - **PWA・スマホ操作最適化**
   - ダークモードをデフォルト採用（ヘッダーからライトモードへ切り替え可能）。
-  - 記録データや設定はブラウザの `localStorage` に自動保存され、オフラインでも動作します。
+  - 登録履歴・金額調整データは **IndexedDB**、テーマ設定やミッション項目設定は **localStorage** に自動保存され、オフラインでも動作します。
   - iOS / Android のホーム画面に追加して、ネイティブアプリのように利用できます。
 
 ---
@@ -54,7 +54,7 @@
 ## 技術構成
 
 - **フロントエンド**: React 19 / TypeScript / Vite / Tailwind CSS v4 / Lucide React
-- **データ永続化**: `localStorage`（サーバー不要・端末内保存）
+- **データ永続化**: IndexedDB（日別登録記録・手動金額調整データ） / `localStorage`（テーマ設定・ミッション項目設定）
 - **PWA**: Web App Manifest（`public/manifest.json`） / Service Worker（`public/sw.js`・自動キャッシュ更新対応）
 
 ---

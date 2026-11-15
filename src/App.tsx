@@ -16,17 +16,21 @@ import {
   AllowanceAdjustment,
   AllowanceStore,
   AppScreen,
+  DailyAllowanceRecord,
   MissionDefinition,
   MissionEntryState,
   RegistrationFeedback,
 } from './types/allowance';
 import {
+  addAdjustmentInDb,
+  deleteAdjustmentInDb,
+  initializeAndLoadDatabase,
+  upsertBulkRecordsInDb,
+  upsertDailyRecordInDb,
+} from './utils/db';
+import {
   calculateBalanceSummary,
-  loadAdjustments,
-  loadAllowanceStore,
   loadMissions,
-  saveAdjustments,
-  saveAllowanceStore,
   saveMissions,
 } from './utils/storage';
 
@@ -43,11 +47,13 @@ function getInitialTheme(): ThemeMode {
 }
 
 export default function App() {
-  const [records, setRecords] = useState<AllowanceStore>(() => loadAllowanceStore());
+  // 登録履歴・金額調整データは IndexedDB で管理
+  const [records, setRecords] = useState<AllowanceStore>({});
+  const [adjustments, setAdjustments] = useState<AllowanceAdjustment[]>([]);
+  const [isDbReady, setIsDbReady] = useState(false);
+
+  // 項目設定・テーマ設定は軽量なため localStorage で同期管理
   const [missions, setMissions] = useState<MissionDefinition[]>(() => loadMissions());
-  const [adjustments, setAdjustments] = useState<AllowanceAdjustment[]>(() =>
-    loadAdjustments()
-  );
   const [theme, setTheme] = useState<ThemeMode>(() => getInitialTheme());
 
   const [screen, setScreen] = useState<AppScreen>('calendar');
@@ -60,6 +66,19 @@ export default function App() {
     const now = new Date();
     return { year: now.getFullYear(), month: now.getMonth() };
   });
+
+  useEffect(() => {
+    let cancelled = false;
+    initializeAndLoadDatabase().then((data) => {
+      if (cancelled) return;
+      setRecords(data.records);
+      setAdjustments(data.adjustments);
+      setIsDbReady(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const isDark = theme === 'dark';
@@ -128,20 +147,22 @@ export default function App() {
 
       const nextRecords: AllowanceStore = { ...records };
       const hasAnyCompleted = Object.values(items).some((item) => item.completed);
+      let savedRecord: DailyAllowanceRecord | null = null;
 
       if (!hasAnyCompleted && totalAmount === 0) {
         delete nextRecords[dateKey];
       } else {
-        nextRecords[dateKey] = {
+        savedRecord = {
           dateKey,
           items,
           totalAmount,
           updatedAt: new Date().toISOString(),
         };
+        nextRecords[dateKey] = savedRecord;
       }
 
       setRecords(nextRecords);
-      saveAllowanceStore(nextRecords);
+      void upsertDailyRecordInDb(savedRecord, dateKey, nextRecords);
 
       triggerFeedback({
         id: Date.now(),
@@ -170,6 +191,8 @@ export default function App() {
       const hasAnyCompleted = Object.values(items).some((item) => item.completed);
       const nowIso = new Date().toISOString();
       const dateDeltas: Record<string, number> = {};
+      const upserts: DailyAllowanceRecord[] = [];
+      const deletes: string[] = [];
       let totalDelta = 0;
 
       for (const dateKey of dateKeys) {
@@ -181,8 +204,9 @@ export default function App() {
 
         if (!hasAnyCompleted && dailyTotalAmount === 0) {
           delete nextRecords[dateKey];
+          deletes.push(dateKey);
         } else {
-          nextRecords[dateKey] = {
+          const rec: DailyAllowanceRecord = {
             dateKey,
             items: Object.fromEntries(
               Object.entries(items).map(([k, v]) => [k, { ...v }])
@@ -190,11 +214,13 @@ export default function App() {
             totalAmount: dailyTotalAmount,
             updatedAt: nowIso,
           };
+          nextRecords[dateKey] = rec;
+          upserts.push(rec);
         }
       }
 
       setRecords(nextRecords);
-      saveAllowanceStore(nextRecords);
+      void upsertBulkRecordsInDb(upserts, deletes, nextRecords);
 
       triggerFeedback({
         id: Date.now(),
@@ -210,7 +236,7 @@ export default function App() {
     [records, adjustments, triggerFeedback]
   );
 
-  // --- ミッション項目 CRUD ---
+  // --- ミッション項目 CRUD（localStorage管理） ---
   const handleAddMission = useCallback(
     (input: Omit<MissionDefinition, 'id' | 'imagePath'>) => {
       setMissions((prev) => {
@@ -248,19 +274,17 @@ export default function App() {
     });
   }, []);
 
-  // --- 任意金額調整 ---
+  // --- 任意金額調整（IndexedDB管理） ---
   const handleAddAdjustment = useCallback(
     (input: Omit<AllowanceAdjustment, 'id' | 'createdAt'>) => {
+      const newAdjustment: AllowanceAdjustment = {
+        ...input,
+        id: `adj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        createdAt: new Date().toISOString(),
+      };
       setAdjustments((prev) => {
-        const next: AllowanceAdjustment[] = [
-          {
-            ...input,
-            id: `adj_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-            createdAt: new Date().toISOString(),
-          },
-          ...prev,
-        ];
-        saveAdjustments(next);
+        const next = [newAdjustment, ...prev];
+        void addAdjustmentInDb(newAdjustment, next);
         return next;
       });
     },
@@ -270,10 +294,18 @@ export default function App() {
   const handleDeleteAdjustment = useCallback((adjustmentId: string) => {
     setAdjustments((prev) => {
       const next = prev.filter((a) => a.id !== adjustmentId);
-      saveAdjustments(next);
+      void deleteAdjustmentInDb(adjustmentId, next);
       return next;
     });
   }, []);
+
+  if (!isDbReady) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center bg-[#FAF9F6] text-stone-500 dark:bg-stone-950 dark:text-stone-400">
+        <p className="text-sm font-medium">データを読み込み中...</p>
+      </div>
+    );
+  }
 
   return (
     <>

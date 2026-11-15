@@ -1,5 +1,5 @@
 /* おこづかい管理くん Service Worker - 自動クリーン更新対応 */
-const CACHE_NAME = 'okozukai-kanri-v1.5.0';
+const CACHE_NAME = 'okozukai-kanri-v1.6.0';
 const PRECACHE_ASSETS = [
   './',
   './index.html',
