@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  /* Reset CSS（iOS Safari / Android Chrome互換・レイアウト崩れ防止） */
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    line-height: 1.5;
+    touch-action: manipulation;
+    overscroll-behavior-y: contain;
+    color-scheme: light;
+  }
+
+  html.dark {
+    color-scheme: dark;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: #faf9f6;
+    color: #1c1917;
+    font-family: "Plus Jakarta Sans", "Zen Maru Gothic", -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Noto Sans JP", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    /* スマホ最適化: 長押し文字選択やダブルタップズームを禁止 */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+
+  html.dark body {
+    background-color: #0c0a09;
+    color: #f5f5f4;
+  }
+
+  input,
+  textarea {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  button,
+  a {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  button {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: none;
+    cursor: pointer;
+  }
+
+  button:focus-visible,
+  a:focus-visible {
+    outline: 2px solid #059669;
+    outline-offset: 2px;
+  }
+}
+
+.font-display {
+  font-family: "Zen Maru Gothic", "Plus Jakarta Sans", sans-serif;
+}
+
+.font-numeric {
+  font-family: "JetBrains Mono", "Plus Jakarta Sans", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.pb-safe {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+@keyframes delta-pop-up {
+  0% {
+    opacity: 0;
+    transform: translateY(10px) scale(0.92);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(-2px) scale(1.03);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(-4px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
+  }
+}
+
+@keyframes delta-pop-down {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+  18% {
+    opacity: 1;
+    transform: translateY(2px) scale(1.02);
+  }
+  80% {
+    opacity: 1;
+    transform: translateY(2px) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes cell-highlight-pop {
+  0% {
+    transform: scale(0.94);
+    box-shadow: inset 0 0 0 2px rgba(16, 185, 129, 0.85);
+  }
+  35% {
+    transform: scale(1.04);
+    box-shadow: inset 0 0 0 2px rgba(16, 185, 129, 0.9);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 0 rgba(16, 185, 129, 0);
+  }
+}
+
+@keyframes cell-highlight-drop {
+  0% {
+    transform: scale(0.96);
+    box-shadow: inset 0 0 0 2px rgba(244, 63, 94, 0.85);
+  }
+  35% {
+    transform: scale(1.02);
+    box-shadow: inset 0 0 0 2px rgba(244, 63, 94, 0.85);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: inset 0 0 0 0 rgba(244, 63, 94, 0);
+  }
+}
+
+.animate-delta-up {
+  animation: delta-pop-up 2.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-delta-down {
+  animation: delta-pop-down 2.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-cell-pop {
+  animation: cell-highlight-pop 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.animate-cell-drop {
+  animation: cell-highlight-drop 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
