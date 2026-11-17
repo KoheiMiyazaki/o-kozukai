@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   CalendarDays,
   CalendarRange,
@@ -11,10 +11,14 @@ import {
   SlidersHorizontal,
   TrendingUp,
   TrendingDown,
+  UserPlus,
+  X,
+  Check,
 } from 'lucide-react';
-import { APP_CONFIG, CALENDAR_CONFIG } from '../data/missions';
+import { APP_CONFIG, CALENDAR_CONFIG, MEMBER_EMOJI_OPTIONS } from '../data/missions';
 import {
   AllowanceAdjustment,
+  AllowanceMember,
   AllowanceStore,
   RegistrationFeedback,
 } from '../types/allowance';
@@ -31,10 +35,14 @@ import { PWAInstallButton } from './PWAInstallButton';
 interface CalendarViewProps {
   currentYear: number;
   currentMonth: number; // 0-indexed (0 = Jan)
+  members: AllowanceMember[];
+  activeMember: AllowanceMember;
   records: AllowanceStore;
   adjustments: AllowanceAdjustment[];
   feedback: RegistrationFeedback | null;
   theme: 'dark' | 'light';
+  onSelectMember: (memberId: string) => void;
+  onAddMember: (input: { name: string; emoji: string }) => void;
   onToggleTheme: () => void;
   onChangeMonth: (year: number, month: number) => void;
   onSelectDate: (dateKey: string) => void;
@@ -45,10 +53,14 @@ interface CalendarViewProps {
 export const CalendarView: React.FC<CalendarViewProps> = ({
   currentYear,
   currentMonth,
+  members,
+  activeMember,
   records,
   adjustments,
   feedback,
   theme,
+  onSelectMember,
+  onAddMember,
   onToggleTheme,
   onChangeMonth,
   onSelectDate,
@@ -57,6 +69,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 }) => {
   const today = useMemo(() => new Date(), []);
   const todayKey = useMemo(() => formatDateKey(today), [today]);
+
+  const [showQuickAddMember, setShowQuickAddMember] = useState(false);
+  const [newMemberName, setNewMemberName] = useState('');
+  const [newMemberEmoji, setNewMemberEmoji] = useState('👦');
+  const [memberError, setMemberError] = useState('');
 
   const calendarCells = useMemo(
     () => buildCalendarGrid(currentYear, currentMonth),
@@ -123,6 +140,19 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
 
   const handleJumpToday = () => {
     onChangeMonth(today.getFullYear(), today.getMonth());
+  };
+
+  const handleSubmitQuickAddMember = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newMemberName.trim();
+    if (!trimmed) {
+      setMemberError('名前を入力してください');
+      return;
+    }
+    onAddMember({ name: trimmed, emoji: newMemberEmoji });
+    setNewMemberName('');
+    setMemberError('');
+    setShowQuickAddMember(false);
   };
 
   const isViewingCurrentMonth =
@@ -209,7 +239,59 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
         </div>
       )}
 
-      <main className="mx-auto max-w-6xl px-4 py-4 sm:px-6 sm:py-6">
+      <main className="mx-auto max-w-6xl px-4 py-4 sm:px-6 sm:py-6 space-y-4">
+        {/* Active Member Banner & 1-Tap Switcher */}
+        <section
+          aria-label="対象者の切り替え"
+          className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-2xl leading-none shrink-0" aria-hidden="true">
+              {activeMember.emoji}
+            </span>
+            <h2 className="font-display text-lg sm:text-xl font-bold text-stone-900 dark:text-stone-100 truncate">
+              {activeMember.name}のお小遣い帳
+            </h2>
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+            {members.map((member) => {
+              const isActive = member.id === activeMember.id;
+              return (
+                <button
+                  key={member.id}
+                  type="button"
+                  onClick={() => onSelectMember(member.id)}
+                  aria-pressed={isActive}
+                  className={`flex min-h-[40px] items-center gap-1.5 rounded-xl px-3 text-xs sm:text-sm font-bold transition-colors active:scale-95 whitespace-nowrap shrink-0 ${
+                    isActive
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'border border-stone-200 bg-white text-stone-700 hover:bg-stone-100 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300 dark:hover:bg-stone-800'
+                  }`}
+                >
+                  <span aria-hidden="true">{member.emoji}</span>
+                  <span>{member.name}</span>
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => {
+                setNewMemberName('');
+                setNewMemberEmoji('👦');
+                setMemberError('');
+                setShowQuickAddMember(true);
+              }}
+              aria-label="対象者を追加"
+              className="flex min-h-[40px] items-center gap-1 rounded-xl border border-dashed border-stone-300 bg-transparent px-3 text-xs font-bold text-stone-600 transition-colors hover:border-emerald-500 hover:text-emerald-700 active:scale-95 whitespace-nowrap shrink-0 dark:border-stone-700 dark:text-stone-400 dark:hover:border-emerald-500 dark:hover:text-emerald-400"
+            >
+              <UserPlus className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span>追加</span>
+            </button>
+          </div>
+        </section>
+
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-12 lg:items-start">
           {/* Left / Main Column: Calendar */}
           <section className="lg:col-span-8 space-y-4" aria-label="おこづかいカレンダー">
@@ -299,10 +381,10 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             {/* Month Controls */}
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <h2 className="font-display text-xl sm:text-2xl font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
+                <h3 className="font-display text-xl sm:text-2xl font-bold text-stone-900 dark:text-stone-100 whitespace-nowrap">
                   <span className="font-numeric">{currentYear}</span>年{' '}
                   <span className="font-numeric">{currentMonth + 1}</span>月
-                </h2>
+                </h3>
                 {!isViewingCurrentMonth && (
                   <button
                     type="button"
@@ -437,7 +519,7 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             </div>
 
             <p className="text-xs text-stone-500 dark:text-stone-400">
-              日付をタップすると、その日のおこづかい登録画面が開きます。
+              日付をタップすると、{activeMember.name}のおこづかい登録画面が開きます。
             </p>
           </section>
 
@@ -589,6 +671,107 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
           </aside>
         </div>
       </main>
+
+      {/* Quick Add Member Modal */}
+      {showQuickAddMember && (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-stone-950/70 p-4 backdrop-blur-xs sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="quick-add-member-title"
+        >
+          <form
+            onSubmit={handleSubmitQuickAddMember}
+            className="w-full max-w-sm rounded-2xl border border-stone-200 bg-white p-5 shadow-xl dark:border-stone-800 dark:bg-stone-900"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <h3
+                id="quick-add-member-title"
+                className="font-display text-base font-bold text-stone-900 dark:text-stone-100"
+              >
+                対象者を追加
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowQuickAddMember(false)}
+                aria-label="閉じる"
+                className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-xl text-stone-500 hover:bg-stone-100 dark:text-stone-400 dark:hover:bg-stone-800"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3.5">
+              <div>
+                <label
+                  htmlFor="quick-member-name"
+                  className="block text-xs font-bold text-stone-600 dark:text-stone-400"
+                >
+                  なまえ（例: たろう、はなこ、パパ）
+                </label>
+                <input
+                  id="quick-member-name"
+                  type="text"
+                  maxLength={16}
+                  autoFocus
+                  placeholder="名前を入力"
+                  value={newMemberName}
+                  onChange={(e) => {
+                    setNewMemberName(e.target.value);
+                    setMemberError('');
+                  }}
+                  className="mt-1 min-h-[44px] w-full rounded-xl border border-stone-200 bg-stone-50 px-3.5 text-sm font-bold text-stone-900 focus:border-emerald-500 focus:outline-none dark:border-stone-700 dark:bg-stone-950 dark:text-stone-100"
+                />
+              </div>
+
+              <div>
+                <span className="block text-xs font-bold text-stone-600 dark:text-stone-400">
+                  アイコン
+                </span>
+                <div className="mt-1.5 grid grid-cols-6 gap-1.5">
+                  {MEMBER_EMOJI_OPTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => setNewMemberEmoji(emoji)}
+                      className={`flex min-h-[40px] items-center justify-center rounded-xl border text-lg transition-colors ${
+                        newMemberEmoji === emoji
+                          ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/70'
+                          : 'border-stone-200 bg-white hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-950 dark:hover:bg-stone-800'
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {memberError && (
+                <p className="text-xs font-bold text-rose-600 dark:text-rose-400">
+                  {memberError}
+                </p>
+              )}
+            </div>
+
+            <div className="mt-5 flex gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowQuickAddMember(false)}
+                className="flex min-h-[44px] flex-1 items-center justify-center rounded-xl border border-stone-200 bg-white text-sm font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-800 dark:text-stone-200 dark:hover:bg-stone-700"
+              >
+                キャンセル
+              </button>
+              <button
+                type="submit"
+                className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-500"
+              >
+                <Check className="h-4 w-4" aria-hidden="true" />
+                <span>追加して切替</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 };

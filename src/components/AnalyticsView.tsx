@@ -1,10 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, PieChart, TrendingUp } from 'lucide-react';
 import { ANALYTICS_CHART_COLORS } from '../data/missions';
-import { AllowanceStore, MissionDefinition } from '../types/allowance';
+import { AllowanceMember, AllowanceStore, MissionDefinition } from '../types/allowance';
 import { formatYen } from '../utils/storage';
 
 interface AnalyticsViewProps {
+  activeMember: AllowanceMember;
   records: AllowanceStore;
   missions: MissionDefinition[];
   onBack: () => void;
@@ -28,6 +29,7 @@ interface MonthlyBar {
 }
 
 export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
+  activeMember,
   records,
   missions,
   onBack,
@@ -148,18 +150,18 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-[#FAF9F6]/90 backdrop-blur-md dark:border-stone-800 dark:bg-stone-950/90">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white"
               aria-hidden="true"
             >
               <PieChart className="h-4 w-4" />
             </span>
-            <h1 className="font-display text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">
-              おこづかい分析
+            <h1 className="font-display truncate text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">
+              {activeMember.emoji} {activeMember.name}の分析
             </h1>
           </div>
-          <span className="font-numeric text-xs font-medium text-stone-500 dark:text-stone-400">
+          <span className="font-numeric shrink-0 text-xs font-medium text-stone-500 dark:text-stone-400">
             累計 {formatYen(breakdown.grandTotal)}
           </span>
         </div>

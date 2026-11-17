@@ -8,17 +8,23 @@ import {
   Plus,
   Settings,
   Trash2,
+  UserPlus,
+  Users,
   X,
 } from 'lucide-react';
-import { CATEGORY_OPTIONS, EMOJI_OPTIONS } from '../data/missions';
+import { CATEGORY_OPTIONS, EMOJI_OPTIONS, MEMBER_EMOJI_OPTIONS } from '../data/missions';
 import {
   AdjustmentType,
   AllowanceAdjustment,
+  AllowanceMember,
   AllowanceStore,
   MissionCategory,
   MissionDefinition,
+  MultiMemberAllowanceStore,
+  MultiMemberMissionsStore,
 } from '../types/allowance';
 import {
+  calculateBalanceSummary,
   downloadAllowanceCsv,
   formatDateKey,
   formatFullDisplayDate,
@@ -26,9 +32,18 @@ import {
 } from '../utils/storage';
 
 interface SettingsViewProps {
+  members: AllowanceMember[];
+  activeMember: AllowanceMember;
   missions: MissionDefinition[];
+  missionsByMember: MultiMemberMissionsStore;
   records: AllowanceStore;
   adjustments: AllowanceAdjustment[];
+  recordsByMember: MultiMemberAllowanceStore;
+  allAdjustments: AllowanceAdjustment[];
+  onSelectMember: (memberId: string) => void;
+  onAddMember: (input: { name: string; emoji: string }) => void;
+  onUpdateMember: (member: AllowanceMember) => void;
+  onDeleteMember: (memberId: string) => void;
   onAddMission: (mission: Omit<MissionDefinition, 'id' | 'imagePath'>) => void;
   onUpdateMission: (mission: MissionDefinition) => void;
   onDeleteMission: (missionId: string) => void;
@@ -38,9 +53,18 @@ interface SettingsViewProps {
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
+  members,
+  activeMember,
   missions,
+  missionsByMember,
   records,
   adjustments,
+  recordsByMember,
+  allAdjustments,
+  onSelectMember,
+  onAddMember,
+  onUpdateMember,
+  onDeleteMember,
   onAddMission,
   onUpdateMission,
   onDeleteMission,
@@ -48,6 +72,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onDeleteAdjustment,
   onBack,
 }) => {
+  // --- 対象者（家族）追加・編集・削除フォーム状態 ---
+  const [isAddingMember, setIsAddingMember] = useState(false);
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [confirmDeleteMemberId, setConfirmDeleteMemberId] = useState<string | null>(null);
+  const [memberFormName, setMemberFormName] = useState('');
+  const [memberFormEmoji, setMemberFormEmoji] = useState('👦');
+  const [memberFormError, setMemberFormError] = useState('');
+
   // --- ミッション追加・編集フォーム状態 ---
   const [isAddingMission, setIsAddingMission] = useState(false);
   const [editingMissionId, setEditingMissionId] = useState<string | null>(null);
@@ -68,7 +100,56 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [adjMessage, setAdjMessage] = useState('');
 
   // --- CSVフィードバック ---
-  const [csvDownloaded, setCsvDownloaded] = useState(false);
+  const [csvDownloaded, setCsvDownloaded] = useState('');
+
+  const openAddMemberForm = () => {
+    setEditingMemberId(null);
+    setConfirmDeleteMemberId(null);
+    setMemberFormName('');
+    setMemberFormEmoji('👦');
+    setMemberFormError('');
+    setIsAddingMember(true);
+  };
+
+  const openEditMemberForm = (member: AllowanceMember) => {
+    setIsAddingMember(false);
+    setConfirmDeleteMemberId(null);
+    setEditingMemberId(member.id);
+    setMemberFormName(member.name);
+    setMemberFormEmoji(member.emoji);
+    setMemberFormError('');
+  };
+
+  const closeMemberForm = () => {
+    setIsAddingMember(false);
+    setEditingMemberId(null);
+    setMemberFormError('');
+  };
+
+  const handleSaveMember = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = memberFormName.trim();
+    if (!trimmed) {
+      setMemberFormError('お名前を入力してください');
+      return;
+    }
+
+    if (editingMemberId) {
+      const target = members.find((m) => m.id === editingMemberId);
+      if (target) {
+        onUpdateMember({
+          ...target,
+          name: trimmed,
+          emoji: memberFormEmoji,
+        });
+      }
+      setEditingMemberId(null);
+    } else {
+      onAddMember({ name: trimmed, emoji: memberFormEmoji });
+      setIsAddingMember(false);
+    }
+    setMemberFormError('');
+  };
 
   const openAddForm = () => {
     setEditingMissionId(null);
@@ -154,6 +235,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
 
     onAddAdjustment({
+      memberId: activeMember.id,
       dateKey: adjDateKey || formatDateKey(new Date()),
       type: adjType,
       amount: Math.round(parsed),
@@ -164,16 +246,40 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setAdjMemo('');
     setAdjMessage(
       adjType === 'add'
-        ? `${formatYen(Math.round(parsed))} を追加しました`
-        : `${formatYen(Math.round(parsed))} を減らしました`
+        ? `${activeMember.name}に ${formatYen(Math.round(parsed))} を追加しました`
+        : `${activeMember.name}から ${formatYen(Math.round(parsed))} を減らしました`
     );
     window.setTimeout(() => setAdjMessage(''), 3000);
   };
 
-  const handleDownloadCsv = () => {
-    downloadAllowanceCsv(records, adjustments, missions);
-    setCsvDownloaded(true);
-    window.setTimeout(() => setCsvDownloaded(false), 3000);
+  const handleSwitchMemberInSettings = (memberId: string) => {
+    setIsAddingMission(false);
+    setEditingMissionId(null);
+    setConfirmDeleteMissionId(null);
+    setMissionError('');
+    setAdjMessage('');
+    onSelectMember(memberId);
+  };
+
+  const handleDownloadActiveCsv = () => {
+    downloadAllowanceCsv(
+      Object.values(records),
+      adjustments,
+      missionsByMember,
+      members,
+      activeMember.name
+    );
+    setCsvDownloaded(`${activeMember.name}のCSVファイルをダウンロードしました`);
+    window.setTimeout(() => setCsvDownloaded(''), 3000);
+  };
+
+  const handleDownloadAllCsv = () => {
+    const allRecordsList = Object.values(recordsByMember).flatMap((mStore) =>
+      Object.values(mStore)
+    );
+    downloadAllowanceCsv(allRecordsList, allAdjustments, missionsByMember, members, 'all');
+    setCsvDownloaded('全員分のCSVファイルをダウンロードしました');
+    window.setTimeout(() => setCsvDownloaded(''), 3000);
   };
 
   const totalRecordDays = Object.keys(records).length;
@@ -183,31 +289,244 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* Header */}
       <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-[#FAF9F6]/90 backdrop-blur-md dark:border-stone-800 dark:bg-stone-950/90">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white"
               aria-hidden="true"
             >
               <Settings className="h-4 w-4" />
             </span>
-            <h1 className="font-display text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">
+            <h1 className="font-display truncate text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">
               設定・データ管理
             </h1>
           </div>
+          <span className="shrink-0 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+            {activeMember.emoji} {activeMember.name}
+          </span>
         </div>
       </header>
 
       <main className="mx-auto max-w-3xl px-4 pt-4 pb-28 sm:px-6 sm:pt-6 space-y-6">
+        {/* Section 0: 対象者（家族）の管理 */}
+        <section
+          aria-label="対象者（家族）の管理"
+          className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs dark:border-stone-800 dark:bg-stone-900"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+                <h2 className="font-display text-base font-bold text-stone-900 dark:text-stone-100">
+                  対象者（家族）の管理
+                </h2>
+              </div>
+              <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
+                お子さまやご家族ごとにお小遣い帳を作成・切り替えできます。
+              </p>
+            </div>
+            {!isAddingMember && !editingMemberId && (
+              <button
+                type="button"
+                onClick={openAddMemberForm}
+                className="inline-flex min-h-[44px] items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 text-xs font-bold text-white transition-colors hover:bg-emerald-500 active:scale-95 whitespace-nowrap shrink-0"
+              >
+                <UserPlus className="h-4 w-4" aria-hidden="true" />
+                <span>対象者を追加</span>
+              </button>
+            )}
+          </div>
+
+          {/* Add / Edit Member Form */}
+          {(isAddingMember || editingMemberId) && (
+            <form
+              onSubmit={handleSaveMember}
+              className="mt-4 space-y-3.5 rounded-xl border border-stone-200 bg-stone-50 p-4 dark:border-stone-700 dark:bg-stone-950"
+            >
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-stone-900 dark:text-stone-100">
+                  {editingMemberId ? '対象者を編集' : '新しい対象者を追加'}
+                </h3>
+                <button
+                  type="button"
+                  onClick={closeMemberForm}
+                  aria-label="フォームを閉じる"
+                  className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg text-stone-500 hover:bg-stone-200 dark:text-stone-400 dark:hover:bg-stone-800"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="settings-member-name"
+                  className="block text-xs font-bold text-stone-600 dark:text-stone-400"
+                >
+                  お名前（例: たろう、はなこ、パパ）
+                </label>
+                <input
+                  id="settings-member-name"
+                  type="text"
+                  maxLength={16}
+                  placeholder="お名前を入力"
+                  value={memberFormName}
+                  onChange={(e) => setMemberFormName(e.target.value)}
+                  className="mt-1 min-h-[44px] w-full rounded-xl border border-stone-200 bg-white px-3.5 text-sm font-medium text-stone-900 focus:border-emerald-500 focus:outline-none dark:border-stone-700 dark:bg-stone-900 dark:text-stone-100"
+                />
+              </div>
+
+              <div>
+                <span className="block text-xs font-bold text-stone-600 dark:text-stone-400">
+                  アイコン
+                </span>
+                <div className="mt-1.5 grid grid-cols-6 gap-1.5">
+                  {MEMBER_EMOJI_OPTIONS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => setMemberFormEmoji(emoji)}
+                      className={`flex min-h-[40px] items-center justify-center rounded-xl border text-lg transition-colors ${
+                        memberFormEmoji === emoji
+                          ? 'border-emerald-600 bg-emerald-50 dark:bg-emerald-950/70'
+                          : 'border-stone-200 bg-white hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-900 dark:hover:bg-stone-800'
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {memberFormError && (
+                <p className="text-xs font-bold text-rose-600 dark:text-rose-400">
+                  {memberFormError}
+                </p>
+              )}
+
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={closeMemberForm}
+                  className="flex min-h-[44px] flex-1 items-center justify-center rounded-xl border border-stone-200 bg-white text-sm font-bold text-stone-700 hover:bg-stone-100 dark:border-stone-700 dark:bg-stone-900 dark:text-stone-300 dark:hover:bg-stone-800"
+                >
+                  キャンセル
+                </button>
+                <button
+                  type="submit"
+                  className="flex min-h-[44px] flex-1 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-500"
+                >
+                  <Check className="h-4 w-4" aria-hidden="true" />
+                  <span>{editingMemberId ? '更新する' : '追加する'}</span>
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* Member List */}
+          <div className="mt-4 divide-y divide-stone-100 dark:divide-stone-800">
+            {members.map((member) => {
+              const isActive = member.id === activeMember.id;
+              const isConfirmingDelete = confirmDeleteMemberId === member.id;
+              const memberRecords = recordsByMember[member.id] ?? {};
+              const memberAdjustments = allAdjustments.filter((a) => a.memberId === member.id);
+              const memberBalance = calculateBalanceSummary(
+                memberRecords,
+                memberAdjustments
+              ).currentBalance;
+
+              return (
+                <div
+                  key={member.id}
+                  className="flex min-h-[60px] items-center justify-between gap-2.5 py-3"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleSwitchMemberInSettings(member.id)}
+                    className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                  >
+                    <div
+                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xl ${
+                        isActive
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-stone-100 dark:bg-stone-800'
+                      }`}
+                      aria-hidden="true"
+                    >
+                      {member.emoji}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <p className="truncate text-sm font-bold text-stone-900 dark:text-stone-100">
+                          {member.name}
+                        </p>
+                        {isActive && (
+                          <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 whitespace-nowrap shrink-0">
+                            選択中
+                          </span>
+                        )}
+                      </div>
+                      <p className="font-numeric text-xs text-stone-500 dark:text-stone-400">
+                        残高 {formatYen(memberBalance)}
+                      </p>
+                    </div>
+                  </button>
+
+                  {isConfirmingDelete ? (
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onDeleteMember(member.id);
+                          setConfirmDeleteMemberId(null);
+                        }}
+                        className="min-h-[40px] rounded-xl bg-rose-600 px-3 text-xs font-bold text-white hover:bg-rose-500 whitespace-nowrap"
+                      >
+                        記録ごと削除
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteMemberId(null)}
+                        className="min-h-[40px] rounded-xl border border-stone-200 px-2.5 text-xs font-bold text-stone-600 dark:border-stone-700 dark:text-stone-300 whitespace-nowrap"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex shrink-0 items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => openEditMemberForm(member)}
+                        aria-label={`${member.name}を編集`}
+                        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-stone-500 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:text-stone-400 dark:hover:bg-stone-800 dark:hover:text-stone-100"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteMemberId(member.id)}
+                        disabled={members.length <= 1}
+                        aria-label={`${member.name}を削除`}
+                        className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-stone-400 transition-colors hover:bg-stone-100 hover:text-rose-600 disabled:pointer-events-none disabled:opacity-30 dark:hover:bg-stone-800 dark:hover:text-rose-400"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
         {/* Section 1: 任意金額の追加・減少 */}
         <section
           aria-label="任意の金額でおこづかいを追加・減少"
           className="rounded-2xl border border-stone-200 bg-white p-5 shadow-xs dark:border-stone-800 dark:bg-stone-900"
         >
           <h2 className="font-display text-base font-bold text-stone-900 dark:text-stone-100">
-            おこづかいの追加・減少
+            {activeMember.emoji} {activeMember.name}のおこづかい追加・減少
           </h2>
           <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-            臨時のおこづかいや、お買い物で使った分を任意の金額で記録できます。
+            {activeMember.name}の臨時おこづかいや、お買い物で使った分を任意の金額で記録できます。
           </p>
 
           <form onSubmit={handleSubmitAdjustment} className="mt-4 space-y-3.5">
@@ -372,10 +691,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <h2 className="font-display text-base font-bold text-stone-900 dark:text-stone-100">
-                おこづかい項目の編集
+                {activeMember.emoji} {activeMember.name}のおこづかい項目
               </h2>
               <p className="mt-0.5 text-xs text-stone-500 dark:text-stone-400">
-                ミッションの追加・金額変更・削除ができます。
+                {activeMember.name}専用のミッション追加・金額変更・削除ができます。
               </p>
             </div>
             {!isAddingMission && !editingMissionId && (
@@ -620,7 +939,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             記録データのダウンロード
           </h2>
           <p className="mt-1 text-xs text-stone-500 dark:text-stone-400">
-            これまでのミッション達成記録と手動調整（登録日数{' '}
+            {activeMember.name}のミッション達成記録と手動調整（登録日数{' '}
             <span className="font-numeric font-bold text-stone-700 dark:text-stone-300">
               {totalRecordDays}日
             </span>
@@ -631,21 +950,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             ）をCSV形式で保存できます。
           </p>
 
-          <button
-            type="button"
-            onClick={handleDownloadCsv}
-            className="mt-4 flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-4 text-sm font-bold text-stone-900 transition-colors hover:bg-stone-100 active:scale-[0.99] dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700"
-          >
-            <Download className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
-            <span>CSV形式でダウンロード</span>
-          </button>
+          <div className="mt-4 flex flex-col gap-2.5">
+            <button
+              type="button"
+              onClick={handleDownloadActiveCsv}
+              className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl border border-stone-200 bg-stone-50 px-4 text-sm font-bold text-stone-900 transition-colors hover:bg-stone-100 active:scale-[0.99] dark:border-stone-700 dark:bg-stone-800 dark:text-stone-100 dark:hover:bg-stone-700"
+            >
+              <Download className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" aria-hidden="true" />
+              <span>{activeMember.name}のCSVをダウンロード</span>
+            </button>
+
+            {members.length > 1 && (
+              <button
+                type="button"
+                onClick={handleDownloadAllCsv}
+                className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl border border-stone-200 bg-white px-4 text-xs font-bold text-stone-700 transition-colors hover:bg-stone-50 active:scale-[0.99] dark:border-stone-800 dark:bg-stone-950 dark:text-stone-300 dark:hover:bg-stone-900"
+              >
+                <Download className="h-4 w-4 shrink-0 text-stone-500 dark:text-stone-400" aria-hidden="true" />
+                <span>全員分まとめてCSVをダウンロード</span>
+              </button>
+            )}
+          </div>
 
           {csvDownloaded && (
             <p
               role="status"
               className="mt-2.5 text-center text-xs font-bold text-emerald-700 dark:text-emerald-400"
             >
-              CSVファイルをダウンロードしました
+              {csvDownloaded}
             </p>
           )}
         </section>

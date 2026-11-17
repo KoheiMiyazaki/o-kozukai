@@ -1,10 +1,11 @@
 import { APP_CONFIG } from '../data/missions';
 import {
   AllowanceAdjustment,
-  AllowanceStore,
   DailyAllowanceRecord,
+  MultiMemberAllowanceStore,
 } from '../types/allowance';
 import {
+  buildRecordCompositeId,
   loadAdjustments as loadLegacyAdjustments,
   loadAllowanceStore as loadLegacyStore,
   saveAdjustments as saveLegacyAdjustments,
@@ -27,13 +28,59 @@ function openDatabase(): Promise<IDBDatabase> {
 
     const request = window.indexedDB.open(APP_CONFIG.dbName, APP_CONFIG.dbVersion);
 
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result;
+      const oldVersion = event.oldVersion;
+      const tx = request.transaction;
+
+      // v1 -> v2: dailyRecords の主キーを dateKey から複合キー id (`${memberId}::${dateKey}`) へ移行
+      if (oldVersion === 1 && tx && db.objectStoreNames.contains(STORE_DAILY_RECORDS)) {
+        const oldRecStore = tx.objectStore(STORE_DAILY_RECORDS);
+        const oldAdjStore = db.objectStoreNames.contains(STORE_ADJUSTMENTS)
+          ? tx.objectStore(STORE_ADJUSTMENTS)
+          : null;
+
+        const recReq = oldRecStore.getAll();
+        const adjReq = oldAdjStore ? oldAdjStore.getAll() : null;
+
+        recReq.onsuccess = () => {
+          const legacyRecs = (recReq.result as DailyAllowanceRecord[]) ?? [];
+          db.deleteObjectStore(STORE_DAILY_RECORDS);
+          const newRecStore = db.createObjectStore(STORE_DAILY_RECORDS, { keyPath: 'id' });
+          newRecStore.createIndex('byMemberId', 'memberId', { unique: false });
+          for (const rec of legacyRecs) {
+            const memberId = rec.memberId || APP_CONFIG.defaultMemberId;
+            newRecStore.put({
+              ...rec,
+              memberId,
+              id: buildRecordCompositeId(memberId, rec.dateKey),
+            });
+          }
+        };
+
+        if (adjReq && oldAdjStore) {
+          adjReq.onsuccess = () => {
+            const legacyAdjs = (adjReq.result as AllowanceAdjustment[]) ?? [];
+            if (!oldAdjStore.indexNames.contains('byMemberId')) {
+              oldAdjStore.createIndex('byMemberId', 'memberId', { unique: false });
+            }
+            for (const adj of legacyAdjs) {
+              if (!adj.memberId) {
+                oldAdjStore.put({ ...adj, memberId: APP_CONFIG.defaultMemberId });
+              }
+            }
+          };
+        }
+        return;
+      }
+
       if (!db.objectStoreNames.contains(STORE_DAILY_RECORDS)) {
-        db.createObjectStore(STORE_DAILY_RECORDS, { keyPath: 'dateKey' });
+        const recStore = db.createObjectStore(STORE_DAILY_RECORDS, { keyPath: 'id' });
+        recStore.createIndex('byMemberId', 'memberId', { unique: false });
       }
       if (!db.objectStoreNames.contains(STORE_ADJUSTMENTS)) {
-        db.createObjectStore(STORE_ADJUSTMENTS, { keyPath: 'id' });
+        const adjStore = db.createObjectStore(STORE_ADJUSTMENTS, { keyPath: 'id' });
+        adjStore.createIndex('byMemberId', 'memberId', { unique: false });
       }
     };
 
@@ -53,15 +100,15 @@ function getAllFromStore<T>(db: IDBDatabase, storeName: string): Promise<T[]> {
 }
 
 /**
- * 既存の localStorage 登録データを IndexedDB へ安全に移行し、全登録データを読み込む
+ * 既存の localStorage 登録データを IndexedDB へ安全に移行し、全対象者の登録データを読み込む
  */
 export async function initializeAndLoadDatabase(): Promise<{
-  records: AllowanceStore;
+  recordsByMember: MultiMemberAllowanceStore;
   adjustments: AllowanceAdjustment[];
 }> {
   if (!isIndexedDBAvailable()) {
     return {
-      records: loadLegacyStore(),
+      recordsByMember: loadLegacyStore(),
       adjustments: loadLegacyAdjustments(),
     };
   }
@@ -74,12 +121,13 @@ export async function initializeAndLoadDatabase(): Promise<{
       window.localStorage.getItem(APP_CONFIG.idbMigratedKey) === '1';
 
     if (!migratedAlready) {
-      const legacyRecords = loadLegacyStore();
+      const legacyStore = loadLegacyStore();
       const legacyAdjustments = loadLegacyAdjustments();
-      const hasLegacyData =
-        Object.keys(legacyRecords).length > 0 || legacyAdjustments.length > 0;
+      const legacyRecordsFlat = Object.values(legacyStore).flatMap((mStore) =>
+        Object.values(mStore)
+      );
 
-      if (hasLegacyData) {
+      if (legacyRecordsFlat.length > 0 || legacyAdjustments.length > 0) {
         const existingRecords = await getAllFromStore<DailyAllowanceRecord>(
           db,
           STORE_DAILY_RECORDS
@@ -88,7 +136,7 @@ export async function initializeAndLoadDatabase(): Promise<{
           db,
           STORE_ADJUSTMENTS
         );
-        const existingRecordKeys = new Set(existingRecords.map((r) => r.dateKey));
+        const existingRecordIds = new Set(existingRecords.map((r) => r.id));
         const existingAdjustmentIds = new Set(existingAdjustments.map((a) => a.id));
 
         await new Promise<void>((resolve, reject) => {
@@ -99,14 +147,19 @@ export async function initializeAndLoadDatabase(): Promise<{
           const recStore = tx.objectStore(STORE_DAILY_RECORDS);
           const adjStore = tx.objectStore(STORE_ADJUSTMENTS);
 
-          for (const rec of Object.values(legacyRecords)) {
-            if (!existingRecordKeys.has(rec.dateKey)) {
-              recStore.put(rec);
+          for (const rec of legacyRecordsFlat) {
+            const memberId = rec.memberId || APP_CONFIG.defaultMemberId;
+            const id = rec.id || buildRecordCompositeId(memberId, rec.dateKey);
+            if (!existingRecordIds.has(id)) {
+              recStore.put({ ...rec, memberId, id });
             }
           }
           for (const adj of legacyAdjustments) {
             if (!existingAdjustmentIds.has(adj.id)) {
-              adjStore.put(adj);
+              adjStore.put({
+                ...adj,
+                memberId: adj.memberId || APP_CONFIG.defaultMemberId,
+              });
             }
           }
 
@@ -125,20 +178,33 @@ export async function initializeAndLoadDatabase(): Promise<{
       getAllFromStore<AllowanceAdjustment>(db, STORE_ADJUSTMENTS),
     ]);
 
-    const records: AllowanceStore = {};
+    const recordsByMember: MultiMemberAllowanceStore = {};
     for (const rec of dailyList) {
-      records[rec.dateKey] = rec;
+      const memberId = rec.memberId || APP_CONFIG.defaultMemberId;
+      if (!recordsByMember[memberId]) {
+        recordsByMember[memberId] = {};
+      }
+      recordsByMember[memberId][rec.dateKey] = {
+        ...rec,
+        memberId,
+        id: rec.id || buildRecordCompositeId(memberId, rec.dateKey),
+      };
     }
 
-    adjustmentList.sort((a, b) => {
-      if (a.dateKey !== b.dateKey) return a.dateKey < b.dateKey ? 1 : -1;
-      return a.createdAt < b.createdAt ? 1 : -1;
-    });
+    const normalizedAdjustments = adjustmentList
+      .map((adj) => ({
+        ...adj,
+        memberId: adj.memberId || APP_CONFIG.defaultMemberId,
+      }))
+      .sort((a, b) => {
+        if (a.dateKey !== b.dateKey) return a.dateKey < b.dateKey ? 1 : -1;
+        return a.createdAt < b.createdAt ? 1 : -1;
+      });
 
-    return { records, adjustments: adjustmentList };
+    return { recordsByMember, adjustments: normalizedAdjustments };
   } catch {
     return {
-      records: loadLegacyStore(),
+      recordsByMember: loadLegacyStore(),
       adjustments: loadLegacyAdjustments(),
     };
   } finally {
@@ -148,8 +214,9 @@ export async function initializeAndLoadDatabase(): Promise<{
 
 export async function upsertDailyRecordInDb(
   record: DailyAllowanceRecord | null,
+  memberId: string,
   dateKey: string,
-  fallbackStore?: AllowanceStore
+  fallbackStore?: MultiMemberAllowanceStore
 ): Promise<void> {
   if (!isIndexedDBAvailable()) {
     if (fallbackStore) saveLegacyStore(fallbackStore);
@@ -159,13 +226,18 @@ export async function upsertDailyRecordInDb(
   let db: IDBDatabase | null = null;
   try {
     db = await openDatabase();
+    const compositeId = buildRecordCompositeId(memberId, dateKey);
     await new Promise<void>((resolve, reject) => {
       const tx = db!.transaction(STORE_DAILY_RECORDS, 'readwrite');
       const store = tx.objectStore(STORE_DAILY_RECORDS);
       if (record) {
-        store.put(record);
+        store.put({
+          ...record,
+          memberId,
+          id: compositeId,
+        });
       } else {
-        store.delete(dateKey);
+        store.delete(compositeId);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -179,8 +251,8 @@ export async function upsertDailyRecordInDb(
 
 export async function upsertBulkRecordsInDb(
   upserts: DailyAllowanceRecord[],
-  deletes: string[],
-  fallbackStore?: AllowanceStore
+  deleteCompositeIds: string[],
+  fallbackStore?: MultiMemberAllowanceStore
 ): Promise<void> {
   if (!isIndexedDBAvailable()) {
     if (fallbackStore) saveLegacyStore(fallbackStore);
@@ -194,10 +266,13 @@ export async function upsertBulkRecordsInDb(
       const tx = db!.transaction(STORE_DAILY_RECORDS, 'readwrite');
       const store = tx.objectStore(STORE_DAILY_RECORDS);
       for (const rec of upserts) {
-        store.put(rec);
+        store.put({
+          ...rec,
+          id: rec.id || buildRecordCompositeId(rec.memberId, rec.dateKey),
+        });
       }
-      for (const dateKey of deletes) {
-        store.delete(dateKey);
+      for (const compositeId of deleteCompositeIds) {
+        store.delete(compositeId);
       }
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);
@@ -254,6 +329,55 @@ export async function deleteAdjustmentInDb(
     });
   } catch {
     if (fallbackList) saveLegacyAdjustments(fallbackList);
+  } finally {
+    db?.close();
+  }
+}
+
+export async function deleteMemberDataInDb(
+  memberId: string,
+  fallbackStore?: MultiMemberAllowanceStore,
+  fallbackAdjustments?: AllowanceAdjustment[]
+): Promise<void> {
+  if (!isIndexedDBAvailable()) {
+    if (fallbackStore) saveLegacyStore(fallbackStore);
+    if (fallbackAdjustments) saveLegacyAdjustments(fallbackAdjustments);
+    return;
+  }
+
+  let db: IDBDatabase | null = null;
+  try {
+    db = await openDatabase();
+    const [allRecords, allAdjustments] = await Promise.all([
+      getAllFromStore<DailyAllowanceRecord>(db, STORE_DAILY_RECORDS),
+      getAllFromStore<AllowanceAdjustment>(db, STORE_ADJUSTMENTS),
+    ]);
+
+    await new Promise<void>((resolve, reject) => {
+      const tx = db!.transaction(
+        [STORE_DAILY_RECORDS, STORE_ADJUSTMENTS],
+        'readwrite'
+      );
+      const recStore = tx.objectStore(STORE_DAILY_RECORDS);
+      const adjStore = tx.objectStore(STORE_ADJUSTMENTS);
+
+      for (const rec of allRecords) {
+        if (rec.memberId === memberId && rec.id) {
+          recStore.delete(rec.id);
+        }
+      }
+      for (const adj of allAdjustments) {
+        if (adj.memberId === memberId) {
+          adjStore.delete(adj.id);
+        }
+      }
+
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {
+    if (fallbackStore) saveLegacyStore(fallbackStore);
+    if (fallbackAdjustments) saveLegacyAdjustments(fallbackAdjustments);
   } finally {
     db?.close();
   }

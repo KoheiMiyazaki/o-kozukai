@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import {
   AllowanceAdjustment,
+  AllowanceMember,
   AllowanceStore,
   MissionDefinition,
 } from '../types/allowance';
@@ -20,6 +21,7 @@ import {
 } from '../utils/storage';
 
 interface LedgerViewProps {
+  activeMember: AllowanceMember;
   records: AllowanceStore;
   adjustments: AllowanceAdjustment[];
   missions: MissionDefinition[];
@@ -50,6 +52,7 @@ type HistoryItem =
     };
 
 export const LedgerView: React.FC<LedgerViewProps> = ({
+  activeMember,
   records,
   adjustments,
   missions,
@@ -120,18 +123,18 @@ export const LedgerView: React.FC<LedgerViewProps> = ({
       {/* Top Bar */}
       <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-[#FAF9F6]/90 backdrop-blur-md dark:border-stone-800 dark:bg-stone-950/90">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
             <span
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white"
               aria-hidden="true"
             >
               <Wallet className="h-4 w-4" />
             </span>
-            <h1 className="font-display text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">
-              お小遣い帳
+            <h1 className="font-display truncate text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">
+              {activeMember.emoji} {activeMember.name}のお小遣い帳
             </h1>
           </div>
-          <span className="font-numeric text-xs font-medium text-stone-500 dark:text-stone-400">
+          <span className="font-numeric shrink-0 text-xs font-medium text-stone-500 dark:text-stone-400">
             最新 {recentHistoryItems.length}件
           </span>
         </div>

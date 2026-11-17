@@ -1,10 +1,13 @@
-import { APP_CONFIG, CALENDAR_CONFIG, MISSIONS_DATA } from '../data/missions';
+import { APP_CONFIG, CALENDAR_CONFIG, DEFAULT_MEMBERS, MISSIONS_DATA } from '../data/missions';
 import {
   AllowanceAdjustment,
+  AllowanceMember,
   AllowanceStore,
   DailyAllowanceRecord,
   MissionDefinition,
   MissionEntryState,
+  MultiMemberAllowanceStore,
+  MultiMemberMissionsStore,
 } from '../types/allowance';
 
 export function formatDateKey(date: Date): string {
@@ -58,6 +61,10 @@ export function formatYen(amount: number): string {
   return `${amount.toLocaleString('ja-JP')}${APP_CONFIG.currencyUnit}`;
 }
 
+export function buildRecordCompositeId(memberId: string, dateKey: string): string {
+  return `${memberId}::${dateKey}`;
+}
+
 export function calculateTotalFromItems(
   items: Record<string, MissionEntryState>,
   missions: MissionDefinition[] = MISSIONS_DATA
@@ -95,19 +102,34 @@ export function createInitialItemsState(
   return initial;
 }
 
-export function loadAllowanceStore(): AllowanceStore {
+export function loadAllowanceStore(): MultiMemberAllowanceStore {
   try {
     const raw = window.localStorage.getItem(APP_CONFIG.storageKey);
     if (!raw) return {};
     const parsed = JSON.parse(raw);
     if (typeof parsed !== 'object' || parsed === null) return {};
-    return parsed as AllowanceStore;
+
+    // 旧形式（dateKey直下）との互換変換
+    const values = Object.values(parsed);
+    if (values.length > 0 && typeof (values[0] as DailyAllowanceRecord)?.dateKey === 'string') {
+      const migrated: AllowanceStore = {};
+      for (const [dateKey, rec] of Object.entries(parsed as AllowanceStore)) {
+        migrated[dateKey] = {
+          ...rec,
+          memberId: rec.memberId || APP_CONFIG.defaultMemberId,
+          id: rec.id || buildRecordCompositeId(rec.memberId || APP_CONFIG.defaultMemberId, dateKey),
+        };
+      }
+      return { [APP_CONFIG.defaultMemberId]: migrated };
+    }
+
+    return parsed as MultiMemberAllowanceStore;
   } catch {
     return {};
   }
 }
 
-export function saveAllowanceStore(store: AllowanceStore): void {
+export function saveAllowanceStore(store: MultiMemberAllowanceStore): void {
   try {
     window.localStorage.setItem(APP_CONFIG.storageKey, JSON.stringify(store));
   } catch {
@@ -115,15 +137,21 @@ export function saveAllowanceStore(store: AllowanceStore): void {
   }
 }
 
+export function cloneDefaultMissions(
+  source: MissionDefinition[] = MISSIONS_DATA
+): MissionDefinition[] {
+  return source.map((mission) => ({ ...mission }));
+}
+
 export function loadMissions(): MissionDefinition[] {
   try {
     const raw = window.localStorage.getItem(APP_CONFIG.missionsStorageKey);
-    if (!raw) return MISSIONS_DATA;
+    if (!raw) return cloneDefaultMissions();
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length === 0) return MISSIONS_DATA;
+    if (!Array.isArray(parsed) || parsed.length === 0) return cloneDefaultMissions();
     return parsed as MissionDefinition[];
   } catch {
-    return MISSIONS_DATA;
+    return cloneDefaultMissions();
   }
 }
 
@@ -135,13 +163,100 @@ export function saveMissions(missions: MissionDefinition[]): void {
   }
 }
 
+export function loadMissionsByMember(
+  members: AllowanceMember[]
+): MultiMemberMissionsStore {
+  const legacyMissions = loadMissions();
+  try {
+    const raw = window.localStorage.getItem(APP_CONFIG.missionsByMemberStorageKey);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed === 'object' && parsed !== null) {
+        const result: MultiMemberMissionsStore = { ...(parsed as MultiMemberMissionsStore) };
+        let changed = false;
+        for (const member of members) {
+          if (!Array.isArray(result[member.id]) || result[member.id].length === 0) {
+            result[member.id] = cloneDefaultMissions(MISSIONS_DATA);
+            changed = true;
+          }
+        }
+        if (changed) {
+          saveMissionsByMember(result);
+        }
+        return result;
+      }
+    }
+  } catch {
+    // fallback to migration/default initialization
+  }
+
+  // 初回移行: 既存のミッション設定を登録済みメンバーへ引き継ぐ
+  const initialized: MultiMemberMissionsStore = {};
+  for (const member of members) {
+    initialized[member.id] = cloneDefaultMissions(legacyMissions);
+  }
+  saveMissionsByMember(initialized);
+  return initialized;
+}
+
+export function saveMissionsByMember(store: MultiMemberMissionsStore): void {
+  try {
+    window.localStorage.setItem(APP_CONFIG.missionsByMemberStorageKey, JSON.stringify(store));
+  } catch {
+    // ignore storage failure
+  }
+}
+
+export function loadMembers(): AllowanceMember[] {
+  try {
+    const raw = window.localStorage.getItem(APP_CONFIG.membersStorageKey);
+    if (!raw) return DEFAULT_MEMBERS;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed) || parsed.length === 0) return DEFAULT_MEMBERS;
+    return parsed as AllowanceMember[];
+  } catch {
+    return DEFAULT_MEMBERS;
+  }
+}
+
+export function saveMembers(members: AllowanceMember[]): void {
+  try {
+    window.localStorage.setItem(APP_CONFIG.membersStorageKey, JSON.stringify(members));
+  } catch {
+    // ignore storage failure
+  }
+}
+
+export function loadActiveMemberId(members: AllowanceMember[]): string {
+  try {
+    const saved = window.localStorage.getItem(APP_CONFIG.activeMemberStorageKey);
+    if (saved && members.some((m) => m.id === saved)) {
+      return saved;
+    }
+  } catch {
+    // ignore
+  }
+  return members[0]?.id ?? APP_CONFIG.defaultMemberId;
+}
+
+export function saveActiveMemberId(memberId: string): void {
+  try {
+    window.localStorage.setItem(APP_CONFIG.activeMemberStorageKey, memberId);
+  } catch {
+    // ignore
+  }
+}
+
 export function loadAdjustments(): AllowanceAdjustment[] {
   try {
     const raw = window.localStorage.getItem(APP_CONFIG.adjustmentsStorageKey);
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed as AllowanceAdjustment[];
+    return (parsed as AllowanceAdjustment[]).map((adj) => ({
+      ...adj,
+      memberId: adj.memberId || APP_CONFIG.defaultMemberId,
+    }));
   } catch {
     return [];
   }
@@ -184,29 +299,34 @@ function escapeCsvField(value: string | number): string {
 }
 
 export function buildAllowanceCsvContent(
-  records: AllowanceStore,
+  recordsList: DailyAllowanceRecord[],
   adjustments: AllowanceAdjustment[],
-  missions: MissionDefinition[]
+  missionsByMember: MultiMemberMissionsStore,
+  members: AllowanceMember[]
 ): string {
-  const missionMap = new Map(missions.map((m) => [m.id, m]));
+  const memberMap = new Map(members.map((m) => [m.id, m]));
+  const missionMapsByMember = new Map<string, Map<string, MissionDefinition>>();
+  for (const [memberId, list] of Object.entries(missionsByMember)) {
+    missionMapsByMember.set(memberId, new Map(list.map((m) => [m.id, m])));
+  }
+
   const rows: string[][] = [
-    ['日付', '区分', '項目名', '単価(円)', '倍率', '金額(円)', 'メモ'],
+    ['日付', '対象者', '区分', '項目名', '単価(円)', '倍率', '金額(円)', 'メモ'],
   ];
 
-  const sortedRecords = Object.values(records).sort((a, b) =>
-    a.dateKey < b.dateKey ? 1 : -1
-  );
-
-  for (const record of sortedRecords) {
+  for (const record of recordsList) {
+    const memberName = memberMap.get(record.memberId)?.name ?? record.memberId;
+    const missionMap = missionMapsByMember.get(record.memberId);
     for (const [missionId, entry] of Object.entries(record.items)) {
       if (!entry.completed) continue;
-      const mission = missionMap.get(missionId);
+      const mission = missionMap?.get(missionId);
       const title = entry.titleSnapshot ?? mission?.title ?? missionId;
       const unitAmount = entry.amountSnapshot ?? mission?.amount ?? 0;
       const multiplier = Math.max(1, entry.multiplier);
       const subtotal = unitAmount * multiplier;
       rows.push([
         record.dateKey,
+        memberName,
         'ミッション達成',
         title,
         String(unitAmount),
@@ -217,14 +337,12 @@ export function buildAllowanceCsvContent(
     }
   }
 
-  const sortedAdjustments = [...adjustments].sort((a, b) =>
-    a.dateKey < b.dateKey ? 1 : -1
-  );
-
-  for (const adj of sortedAdjustments) {
+  for (const adj of adjustments) {
+    const memberName = memberMap.get(adj.memberId)?.name ?? adj.memberId;
     const signedAmount = adj.type === 'add' ? adj.amount : -adj.amount;
     rows.push([
       adj.dateKey,
+      memberName,
       adj.type === 'add' ? '手動追加' : '手動減少',
       adj.memo || (adj.type === 'add' ? 'おこづかい追加' : 'おこづかい利用'),
       String(signedAmount),
@@ -234,7 +352,6 @@ export function buildAllowanceCsvContent(
     ]);
   }
 
-  // Sort all data rows (excluding header) by date desc
   const header = rows[0];
   const dataRows = rows.slice(1).sort((a, b) => (a[0] < b[0] ? 1 : a[0] > b[0] ? -1 : 0));
 
@@ -245,17 +362,19 @@ export function buildAllowanceCsvContent(
 }
 
 export function downloadAllowanceCsv(
-  records: AllowanceStore,
+  recordsList: DailyAllowanceRecord[],
   adjustments: AllowanceAdjustment[],
-  missions: MissionDefinition[]
+  missionsByMember: MultiMemberMissionsStore,
+  members: AllowanceMember[],
+  fileSuffix: string
 ): void {
-  const csv = buildAllowanceCsvContent(records, adjustments, missions);
+  const csv = buildAllowanceCsvContent(recordsList, adjustments, missionsByMember, members);
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const todayStr = formatDateKey(new Date());
   const link = document.createElement('a');
   link.href = url;
-  link.setAttribute('download', `okozukai_records_${todayStr}.csv`);
+  link.setAttribute('download', `okozukai_${fileSuffix}_${todayStr}.csv`);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);

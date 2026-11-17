@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { AlertTriangle, ArrowLeft, CalendarRange, Check, Minus, RotateCcw } from 'lucide-react';
 import { APP_CONFIG } from '../data/missions';
 import {
+  AllowanceMember,
   AllowanceStore,
   MissionDefinition,
   MissionEntryState,
@@ -17,6 +18,7 @@ import {
 import { AnimatedYen } from './AnimatedYen';
 
 interface BulkRegisterViewProps {
+  activeMember: AllowanceMember;
   missions: MissionDefinition[];
   records: AllowanceStore;
   onBack: () => void;
@@ -28,6 +30,7 @@ interface BulkRegisterViewProps {
 }
 
 export const BulkRegisterView: React.FC<BulkRegisterViewProps> = ({
+  activeMember,
   missions,
   records,
   onBack,
@@ -168,11 +171,14 @@ export const BulkRegisterView: React.FC<BulkRegisterViewProps> = ({
       {/* Compact Sticky Top Bar */}
       <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-[#FAF9F6]/90 backdrop-blur-md dark:border-stone-800 dark:bg-stone-950/90">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="flex min-w-[76px] items-center">
+          <div className="flex min-w-[76px] items-center gap-1.5">
             <CalendarRange
-              className="h-5 w-5 text-emerald-600 dark:text-emerald-400"
+              className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400"
               aria-hidden="true"
             />
+            <span className="truncate text-xs font-bold text-emerald-700 dark:text-emerald-400">
+              {activeMember.emoji} {activeMember.name}
+            </span>
           </div>
 
           <h1 className="font-display truncate text-center text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">

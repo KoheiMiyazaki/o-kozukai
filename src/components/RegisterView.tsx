@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ArrowLeft, Check, Minus, RotateCcw } from 'lucide-react';
 import { APP_CONFIG } from '../data/missions';
 import {
+  AllowanceMember,
   DailyAllowanceRecord,
   MissionDefinition,
   MissionEntryState,
@@ -16,6 +17,7 @@ import { AnimatedYen } from './AnimatedYen';
 
 interface RegisterViewProps {
   dateKey: string;
+  activeMember: AllowanceMember;
   missions: MissionDefinition[];
   existingRecord?: DailyAllowanceRecord;
   onBack: () => void;
@@ -28,6 +30,7 @@ interface RegisterViewProps {
 
 export const RegisterView: React.FC<RegisterViewProps> = ({
   dateKey,
+  activeMember,
   missions,
   existingRecord,
   onBack,
@@ -125,7 +128,11 @@ export const RegisterView: React.FC<RegisterViewProps> = ({
       {/* Compact Sticky Top Bar */}
       <header className="sticky top-0 z-30 border-b border-stone-200/80 bg-[#FAF9F6]/90 backdrop-blur-md dark:border-stone-800 dark:bg-stone-950/90">
         <div className="mx-auto flex h-14 max-w-3xl items-center justify-between gap-3 px-4 sm:px-6">
-          <div className="min-w-[76px]" aria-hidden="true" />
+          <div className="flex min-w-[76px] items-center">
+            <span className="truncate text-xs font-bold text-emerald-700 dark:text-emerald-400">
+              {activeMember.emoji} {activeMember.name}
+            </span>
+          </div>
 
           <h1 className="font-display truncate text-center text-base sm:text-lg font-bold text-stone-900 dark:text-stone-100">
             {formatDisplayDate(dateKey)}

@@ -1,8 +1,21 @@
 export type MissionCategory = 'おてつだい' | 'べんきょう' | 'せいかつ';
 
-export type AppScreen = 'calendar' | 'register' | 'bulk-register' | 'ledger' | 'analytics' | 'settings';
+export type AppScreen =
+  | 'calendar'
+  | 'register'
+  | 'bulk-register'
+  | 'ledger'
+  | 'analytics'
+  | 'settings';
 
 export type AdjustmentType = 'add' | 'subtract';
+
+export interface AllowanceMember {
+  id: string;
+  name: string;
+  emoji: string;
+  createdAt: string;
+}
 
 export interface MissionDefinition {
   id: string;
@@ -17,6 +30,9 @@ export interface MissionDefinition {
   /** TODO: 将来本物の画像に差し替える際のファイルパス（例: './assets/laundry.png'） */
   imagePath: string;
 }
+
+/** 全対象者の memberId -> MissionDefinition[] マップ */
+export type MultiMemberMissionsStore = Record<string, MissionDefinition[]>;
 
 export interface MissionEntryState {
   completed: boolean;
@@ -35,16 +51,24 @@ export interface DailyMissionItemRecord {
 }
 
 export interface DailyAllowanceRecord {
+  /** IndexedDB 主キー: `${memberId}::${dateKey}` */
+  id?: string;
+  memberId: string;
   dateKey: string; // YYYY-MM-DD
   items: Record<string, MissionEntryState>;
   totalAmount: number;
   updatedAt: string;
 }
 
+/** 1対象者分の dateKey -> DailyAllowanceRecord マップ */
 export type AllowanceStore = Record<string, DailyAllowanceRecord>;
+
+/** 全対象者の memberId -> AllowanceStore マップ */
+export type MultiMemberAllowanceStore = Record<string, AllowanceStore>;
 
 export interface AllowanceAdjustment {
   id: string;
+  memberId: string;
   dateKey: string; // YYYY-MM-DD
   type: AdjustmentType;
   amount: number;

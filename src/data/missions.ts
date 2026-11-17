@@ -1,4 +1,4 @@
-import { MissionCategory, MissionDefinition } from '../types/allowance';
+import { AllowanceMember, MissionCategory, MissionDefinition } from '../types/allowance';
 
 /**
  * アプリ全体の基本設定・ラベル定義（疎結合データ）
@@ -9,14 +9,42 @@ export const APP_CONFIG = {
   shortName: 'おこづかい',
   currencyUnit: '円',
   dbName: 'okozukai_kanri_db',
-  dbVersion: 1,
+  dbVersion: 2,
+  defaultMemberId: 'default_member',
   idbMigratedKey: 'okozukai_kanri_idb_migrated_v1',
   storageKey: 'okozukai_kanri_records_v1',
   missionsStorageKey: 'okozukai_kanri_missions_v1',
+  missionsByMemberStorageKey: 'okozukai_kanri_missions_by_member_v1',
   adjustmentsStorageKey: 'okozukai_kanri_adjustments_v1',
+  membersStorageKey: 'okozukai_kanri_members_v1',
+  activeMemberStorageKey: 'okozukai_kanri_active_member_v1',
   themeStorageKey: 'okozukai_kanri_theme_v1',
   maxMultiplier: 99,
 } as const;
+
+export const DEFAULT_MEMBERS: AllowanceMember[] = [
+  {
+    id: APP_CONFIG.defaultMemberId,
+    name: 'わたし',
+    emoji: '😊',
+    createdAt: '2026-01-01T00:00:00.000Z',
+  },
+];
+
+export const MEMBER_EMOJI_OPTIONS: string[] = [
+  '👦',
+  '👧',
+  '🧒',
+  '👶',
+  '👨',
+  '👩',
+  '🧑',
+  '😊',
+  '🐱',
+  '🐶',
+  '🐰',
+  '🐻',
+];
 
 export const CALENDAR_CONFIG = {
   weekDays: ['日', '月', '火', '水', '木', '金', '土'] as const,
